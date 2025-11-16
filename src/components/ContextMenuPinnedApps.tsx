@@ -11,6 +11,7 @@ import PushPinIcon from '@mui/icons-material/PushPin';
 import { saveToLocalStorage } from './Apps/AppsNavBarDesktop';
 import { sortablePinnedAppsAtom } from '../atoms/global';
 import { useSetAtom } from 'jotai';
+import { shouldAllowNativeContextMenu } from '../utils/nativeContextMenu';
 
 const CustomStyledMenu = styled(Menu)(({ theme }) => ({
   '& .MuiPaper-root': {
@@ -41,6 +42,9 @@ export const ContextMenuPinnedApps = ({ children, app, isMine }) => {
 
   const handleContextMenu = (event) => {
     if (isMine) return;
+    if (shouldAllowNativeContextMenu(event)) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     preventClick.current = true;

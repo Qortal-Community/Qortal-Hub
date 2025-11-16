@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { Menu, MenuItem, Typography, styled } from '@mui/material';
+import { shouldAllowNativeContextMenu } from '../utils/nativeContextMenu';
 
 const CustomStyledMenu = styled(Menu)(({ theme }) => ({
   '& .MuiPaper-root': {
@@ -29,6 +30,9 @@ export const ContextMenuMentions = ({
 
   // Handle right-click (context menu) for desktop
   const handleContextMenu = (event) => {
+    if (shouldAllowNativeContextMenu(event)) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation(); // Prevent parent click
 
