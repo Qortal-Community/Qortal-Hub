@@ -5,7 +5,7 @@ import {
   setupCapacitorElectronPlugins,
 } from '@capacitor-community/electron';
 import chokidar from 'chokidar';
-import type { MenuItemConstructorOptions } from 'electron';
+import type { MenuItemConstructorOptions, WebContents } from 'electron';
 import {
   app,
   BrowserWindow,
@@ -16,6 +16,8 @@ import {
   session,
   ipcMain,
   dialog,
+  clipboard,
+  shell,
 } from 'electron';
 import electronIsDev from 'electron-is-dev';
 import electronServe from 'electron-serve';
@@ -64,6 +66,25 @@ const defaultDomains = [
 // let allowedDomains: string[] = [...defaultDomains]
 const domainHolder = {
   allowedDomains: [...defaultDomains],
+};
+
+type NativeContextMenuAction = {
+  id: string;
+  label: string;
+  enabled?: boolean;
+};
+
+type NativeContextMenuContext = {
+  hasSelection?: boolean;
+  selectionText?: string;
+  isEditable?: boolean;
+  linkURL?: string;
+};
+
+type NativeContextMenuRequest = {
+  requestId: string;
+  actions?: NativeContextMenuAction[];
+  context?: NativeContextMenuContext;
 };
 // Define components for a watcher to detect when the webapp is changed so we can reload in Dev mode.
 const reloadWatcher = {
@@ -477,6 +498,34 @@ ipcMain.handle('fs:selectAndZip', async (_, path) => {
   }
 });
 
+ipcMain.handle(
+  'native-context-menu:show',
+  (event, payload: NativeContextMenuRequest) => {
+    try {
+      if (!payload || typeof payload !== 'object') return;
+      if (typeof payload.requestId !== 'string' || !payload.requestId) return;
+      if (!shouldShowMenu(payload)) return;
+
+      const browserWindow = BrowserWindow.fromWebContents(event.sender);
+      if (!browserWindow || browserWindow.isDestroyed()) return;
+
+      const template = buildNativeMenuTemplate(
+        {
+          requestId: payload.requestId,
+          context: sanitizeContextDetails(payload.context),
+          actions: payload.actions,
+        },
+        event.sender
+      );
+
+      if (!template.length) return;
+      Menu.buildFromTemplate(template).popup({ window: browserWindow });
+    } catch (error) {
+      console.error('Failed to show native context menu', error);
+    }
+  }
+);
+
 // Helper to get or create the shared settings directory
 export async function getSharedSettingsFilePath(
   fileName: string
@@ -832,3 +881,140 @@ ipcMain.handle('coreSetup:pickQortalDirectory', async () => {
     return false;
   }
 });
+const sanitizeContextDetails = (
+  context?: NativeContextMenuContext
+): NativeContextMenuContext => {
+  if (!context || typeof context !== 'object') {
+    return {};
+  }
+
+  const sanitized: NativeContextMenuContext = {};
+
+  if (context.hasSelection) {
+    sanitized.hasSelection = true;
+  }
+  if (typeof context.selectionText === 'string') {
+    sanitized.selectionText = context.selectionText;
+  }
+  if (context.isEditable) {
+    sanitized.isEditable = true;
+  }
+  if (typeof context.linkURL === 'string' && context.linkURL.length > 0) {
+    sanitized.linkURL = context.linkURL;
+  }
+
+  return sanitized;
+};
+
+const getContextMenuDefaults = (
+  context?: NativeContextMenuContext
+): MenuItemConstructorOptions[] => {
+  if (!context) return [];
+
+  const template: MenuItemConstructorOptions[] = [];
+  const hasSelection =
+    typeof context.selectionText === 'string' &&
+    context.selectionText.trim().length > 0;
+
+  if (context.isEditable) {
+    template.push(
+      { role: 'undo' },
+      { role: 'redo' },
+      { type: 'separator' },
+      { role: 'cut' },
+      { role: 'copy' },
+      { role: 'paste' },
+      { type: 'separator' },
+      { role: 'selectAll' }
+    );
+  } else if (hasSelection || context.hasSelection) {
+    template.push(
+      { role: 'copy' },
+      { type: 'separator' },
+      { role: 'selectAll' }
+    );
+  }
+
+  if (context.linkURL) {
+    if (template.length) {
+      template.push({ type: 'separator' });
+    }
+    template.push(
+      {
+        label: 'Open Link in Browser',
+        click: () => {
+          try {
+            shell.openExternal(context.linkURL!);
+          } catch (error) {
+            console.error('Failed to open link', error);
+          }
+        },
+      },
+      {
+        label: 'Copy Link Address',
+        click: () => {
+          try {
+            clipboard.writeText(context.linkURL!);
+          } catch (error) {
+            console.error('Failed to copy link', error);
+          }
+        },
+      }
+    );
+  }
+
+  return template;
+};
+
+const buildNativeMenuTemplate = (
+  request: NativeContextMenuRequest,
+  sender: WebContents
+): MenuItemConstructorOptions[] => {
+  const template = getContextMenuDefaults(request.context);
+  const actions = Array.isArray(request.actions)
+    ? request.actions.filter(
+        (item): item is NativeContextMenuAction =>
+          !!item &&
+          typeof item.id === 'string' &&
+          item.id.length > 0 &&
+          typeof item.label === 'string' &&
+          item.label.length > 0
+      )
+    : [];
+
+  if (template.length && actions.length) {
+    template.push({ type: 'separator' });
+  }
+
+  actions.forEach((action) => {
+    template.push({
+      label: action.label,
+      enabled: action.enabled !== false,
+      click: () => {
+        sender.send('native-context-menu:action', {
+          requestId: request.requestId,
+          actionId: action.id,
+        });
+      },
+    });
+  });
+
+  return template;
+};
+
+const shouldShowMenu = (request?: NativeContextMenuRequest) => {
+  if (!request) return false;
+  const hasCustomActions = Array.isArray(request.actions)
+    ? request.actions.some(
+        (action) =>
+          action &&
+          typeof action.id === 'string' &&
+          action.id.length > 0 &&
+          typeof action.label === 'string' &&
+          action.label.length > 0
+      )
+    : false;
+
+  const hasDefaults = getContextMenuDefaults(request.context).length > 0;
+  return hasCustomActions || hasDefaults;
+};

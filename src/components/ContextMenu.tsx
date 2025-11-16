@@ -12,6 +12,7 @@ import NotificationsOffIcon from '@mui/icons-material/NotificationsOff';
 import { executeEvent } from '../utils/events';
 import { mutedGroupsAtom } from '../atoms/global';
 import { useAtom } from 'jotai';
+import { shouldAllowNativeContextMenu } from '../utils/nativeContextMenu';
 
 const CustomStyledMenu = styled(Menu)(({ theme }) => ({
   '& .MuiPaper-root': {
@@ -43,6 +44,9 @@ export const ContextMenu = ({ children, groupId, getUserSettings }) => {
 
   // Handle right-click (context menu) for desktop
   const handleContextMenu = (event) => {
+    if (shouldAllowNativeContextMenu(event)) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation(); // Prevent parent click
 

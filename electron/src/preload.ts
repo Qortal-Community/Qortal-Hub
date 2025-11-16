@@ -4,6 +4,30 @@ require('./rt/electron-rt');
 console.log('User Preload!');
 import { contextBridge, shell, ipcRenderer } from 'electron';
 
+type NativeContextMenuAction = {
+  id: string;
+  label: string;
+  enabled?: boolean;
+};
+
+type NativeContextMenuContext = {
+  hasSelection?: boolean;
+  selectionText?: string;
+  isEditable?: boolean;
+  linkURL?: string;
+};
+
+type NativeContextMenuRequest = {
+  requestId: string;
+  actions?: NativeContextMenuAction[];
+  context?: NativeContextMenuContext;
+};
+
+type NativeContextMenuActionEvent = {
+  requestId: string;
+  actionId: string;
+};
+
 try {
   // Expose Electron API
   contextBridge.exposeInMainWorld('electronAPI', {
@@ -139,6 +163,25 @@ try {
   });
 
   ipcRenderer.send('test-ipc');
+
+  contextBridge.exposeInMainWorld('nativeContextMenu', {
+    showMenu: (payload: NativeContextMenuRequest) => {
+      if (!payload || typeof payload !== 'object') {
+        return;
+      }
+      ipcRenderer.invoke('native-context-menu:show', payload);
+    },
+    onAction: (callback: (data: NativeContextMenuActionEvent) => void) => {
+      const channel = 'native-context-menu:action';
+      const handler = (_event: unknown, data: NativeContextMenuActionEvent) => {
+        callback?.(data);
+      };
+      ipcRenderer.on(channel, handler);
+      return () => {
+        ipcRenderer.removeListener(channel, handler);
+      };
+    },
+  });
 } catch (error) {
   console.log('error', error);
 }
