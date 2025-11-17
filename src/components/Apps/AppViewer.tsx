@@ -331,6 +331,9 @@ export const AppViewer = forwardRef<HTMLIFrameElement, AppViewerProps>(
           flexDirection: 'column',
         }}
       >
+        {/* Native text context menus for the sandboxed Q-App iframe are handled
+            in electron/src/setup.ts via webContents 'context-menu' listener so
+            inputs retain OS Cut/Copy/Paste behaviour. */}
         <iframe
           ref={iframeRef}
           style={{
