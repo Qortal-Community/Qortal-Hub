@@ -5,7 +5,11 @@ import {
   setupCapacitorElectronPlugins,
 } from '@capacitor-community/electron';
 import chokidar from 'chokidar';
-import type { MenuItemConstructorOptions, WebContents } from 'electron';
+import type {
+  MenuItemConstructorOptions,
+  WebContents,
+  ContextMenuParams,
+} from 'electron';
 import {
   app,
   BrowserWindow,
@@ -86,6 +90,43 @@ type NativeContextMenuRequest = {
   actions?: NativeContextMenuAction[];
   context?: NativeContextMenuContext;
 };
+
+const isInternalRendererUrl = (url?: string) => {
+  if (!url) return true;
+  const normalized = url.toLowerCase();
+  return (
+    normalized.startsWith('capacitor-electron://') ||
+    normalized.startsWith('devtools://') ||
+    normalized.startsWith('chrome-devtools://') ||
+    normalized.startsWith('edge://') ||
+    normalized === 'about:blank'
+  );
+};
+
+const shouldHandleEmbeddedContextMenu = (params: ContextMenuParams) => {
+  const frameUrl = params.frameURL || params.pageURL;
+  if (!frameUrl || isInternalRendererUrl(frameUrl)) return false;
+
+  const hasSelection =
+    typeof params.selectionText === 'string' &&
+    params.selectionText.trim().length > 0;
+
+  return params.isEditable || hasSelection || !!params.linkURL;
+};
+
+const buildContextFromParams = (
+  params: ContextMenuParams
+): NativeContextMenuContext => ({
+  isEditable: params.isEditable,
+  selectionText: params.selectionText,
+  hasSelection:
+    typeof params.selectionText === 'string' &&
+    params.selectionText.trim().length > 0,
+  linkURL:
+    typeof params.linkURL === 'string' && params.linkURL.trim().length > 0
+      ? params.linkURL
+      : undefined,
+});
 // Define components for a watcher to detect when the webapp is changed so we can reload in Dev mode.
 const reloadWatcher = {
   debouncer: null,
@@ -205,6 +246,30 @@ export class ElectronCapacitorApp {
       },
     });
     this.mainWindowState.manage(this.MainWindow);
+
+    // Allow embedded Q-Apps (sandboxed iframes) to keep native OS menus for text inputs.
+    this.MainWindow.webContents.on(
+      'context-menu',
+      (event, params: ContextMenuParams) => {
+        if (
+          !shouldHandleEmbeddedContextMenu(params) ||
+          !this.MainWindow ||
+          this.MainWindow.isDestroyed()
+        ) {
+          return;
+        }
+
+        const template = getContextMenuDefaults(
+          sanitizeContextDetails(buildContextFromParams(params))
+        );
+        if (!template.length) {
+          return;
+        }
+
+        event.preventDefault();
+        Menu.buildFromTemplate(template).popup({ window: this.MainWindow });
+      }
+    );
 
     if (this.CapacitorFileConfig.backgroundColor) {
       this.MainWindow.setBackgroundColor(
